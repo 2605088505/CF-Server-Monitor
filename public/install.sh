@@ -50,6 +50,7 @@ detect_os() {
     case "$OS_ID" in
         ubuntu|debian|raspbian) PKG_MGR="apt-get" ;;
         centos|rhel|fedora|rocky|almalinux|ol|amzn) PKG_MGR="yum" ;;
+        alpine) error "未识别的系统类型: alpine，请在后台选择正确的系统后复制命令重试" ;;
         *) warn "未识别的系统类型: $OS_ID，尝试默认使用 apt-get" ; PKG_MGR="apt-get" ;;
     esac
 }

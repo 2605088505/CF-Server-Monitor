@@ -797,7 +797,7 @@ install_probe() {
             
             sed -i "s/RX_PERIOD=.*/RX_PERIOD=${current_rx_period}/" "${traffic_data_file}"
             sed -i "s/TX_PERIOD=.*/TX_PERIOD=${current_tx_period}/" "${traffic_data_file}"
-            success "流量校正完成"
+            info "流量校正完成"
         else
             if [ -n "${RX_CORRECTION}" ] || [ -n "${TX_CORRECTION}" ]; then
                 mkdir -p "${traffic_data_dir}" 2>/dev/null || true
@@ -818,7 +818,7 @@ TX_PERIOD=${tx_correction_bytes}
 LAST_CHECK=${now_ts}
 PERIOD_START=0
 EOF
-                success "流量数据文件创建完成"
+                info "流量数据文件创建完成"
             fi
         fi
     fi
