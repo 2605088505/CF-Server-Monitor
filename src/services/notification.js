@@ -60,7 +60,10 @@ export async function sendNotification(settings, msg) {
     } catch (e) {
       return "飞书机器人通知发送失败: " + e.message;
     }
-  }else if(settings.tg_bot_token.includes("https://api.day.app/")) {
+  }else if(settings.tg_bot_token.includes("https://api.day.app/") || settings.tg_bot_token.indexOf("bark:") == 0) {
+    if(settings.tg_bot_token.indexOf("bark:") == 0) {
+      settings.tg_bot_token = settings.tg_bot_token.replace("bark:", "");
+    }
     try {
       await fetchWithRetry(settings.tg_bot_token, {
         method: 'POST',
@@ -72,7 +75,7 @@ export async function sendNotification(settings, msg) {
         })
       });
     } catch (e) {
-      return "企业微信通知发送失败: " + e.message;
+      return "Bark通知发送失败: " + e.message;
     }
   }else if(settings.tg_bot_token.includes("https://qyapi.weixin.qq.com")){
     try {
@@ -118,6 +121,23 @@ export async function sendNotification(settings, msg) {
     } catch (e) {
       return "WxPusher通知发送失败: " + e.message;
     }
+  }else if(settings.tg_bot_token.includes("/message?token=")) {
+    try {
+      await fetchWithRetry(settings.tg_bot_token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: title,
+          message: msg,
+          priority: 5,
+          extras: {
+            "client::display": { "contentType": "text/markdown" }
+          }
+        })
+      });
+    } catch (e) {
+      return "Gotify通知发送失败: " + e.message;
+    }
   }else {
     return "未知的通知方式";
   }
@@ -127,18 +147,6 @@ export async function checkOfflineNodes(db) {
   const siteSettings = await loadSiteSettings(db);
 
   if (siteSettings.tg_notify !== 'true'|| !siteSettings.tg_bot_token) return;
-
-  const skipCount = parseInt(siteSettings.cleanup_skip_count || '0', 10) || 0;
-  debug(`[Cron] 检测到当前跳过次数: ${skipCount}`);
-  if (skipCount > 0) {
-    debug(`[Cron] 检测到表轮换进行中，跳过离线检测（剩余跳过次数: ${6 - skipCount}）`);
-    
-    const newCount = skipCount + 1;
-    const finalCount = newCount > 5 ? 0 : newCount;
-    
-    await saveSiteOptions(db, { cleanup_skip_count: String(finalCount) });
-    return;
-  }
 
   try {
     const allServers = await getAllServers(db);
@@ -163,6 +171,8 @@ export async function checkOfflineNodes(db) {
     const recoveredNodes = [];
 
     for (const s of allServers) {
+      if (s.offline_notify_disabled === '1') continue;
+
       const latestMetrics = latestMetricsMap.get(s.id);
       
       let isOffline = true;

@@ -17,10 +17,12 @@
         <div v-if="sysConfig.show_expire && server.expire_date" class="card-meta-item">📅 <span :class="{ 'expired': isExpired }">{{ expireText }}</span></div>
       </div>
       <div class="card-badges">
-        <span v-if="sysConfig.show_bw && server.bandwidth" class="badge badge-bw">{{ server.bandwidth }}</span>
-        <span v-if="sysConfig.show_tf && server.traffic_limit" class="badge badge-tf">{{ formatBytes(server.traffic_limit * 1024 * 1024 * 1024) }}</span>
-        <span v-if="server.ip_v4 === '1'" class="badge badge-v4">IPv4</span>
-        <span v-if="server.ip_v6 === '1'" class="badge badge-v6">IPv6</span>
+        <span v-for="(tag, index) in tagList" :key="tag" :class="['badge', 'badge-tag', tagColorClass(index)]">{{ tag }}</span>
+        <span v-if="server.ip_v4 === '1' && server.ip_v6 === '1'" class="badge badge badge-v4-v6">IPv4/6</span>
+        <template v-else>
+          <span v-if="server.ip_v4 === '1'" class="badge badge-v4">IPv4</span>
+          <span v-if="server.ip_v6 === '1'" class="badge badge-v6">IPv6</span>
+        </template>
       </div>
     </div>
     <div class="server-stats">
@@ -61,6 +63,7 @@
         <span class="stat-key">TRF</span>
         <span class="net-down">▼ {{ totalRx }}</span>
         <span class="net-up">▲ {{ totalTx }}</span>
+        <span v-if="sysConfig.show_tf && server.traffic_limit" class="stat-limit">/ 📦 {{ formatBytes(server.traffic_limit * 1024 * 1024 * 1024) }}</span>
       </div>
       <div v-if="sysConfig.show_time" class="stat-row stat-time-row">
         <span class="stat-key">TIME</span>
@@ -91,7 +94,7 @@
 <script setup>
 import { computed } from 'vue'
 import { formatBytes, getFlagRegionCode, getTrafficUsagePercent, isServerOnline } from '../utils/api'
-import { t, currentLang, useTranslation } from '../utils/i18n'
+import { useTranslation } from '../utils/i18n'
 import { PING } from '../utils/constants'
 import { normalizeTimestamp, formatDateTime } from '../utils/time.js'
 
@@ -105,7 +108,6 @@ const props = defineProps({
     default: () => ({
       show_price: true,
       show_expire: true,
-      show_bw: true,
       show_tf: true,
       show_time: true
     })
@@ -148,11 +150,17 @@ const diskPercent = computed(() => {
 })
 
 const trafficUsagePercent = computed(() => getTrafficUsagePercent(props.server))
+const tagList = computed(() => String(props.server.tags || '')
+  .split(',')
+  .map(tag => tag.trim())
+  .filter(Boolean)
+)
+const tagColorClass = (index) => `tag-color-${index % 6}`
 
 const netInSpeed = computed(() => formatBytes(props.server.net_in_speed))
 const netOutSpeed = computed(() => formatBytes(props.server.net_out_speed))
-const totalRx = computed(() => formatBytes(props.server.net_rx))
-const totalTx = computed(() => formatBytes(props.server.net_tx))
+const totalRx = computed(() => formatBytes(props.server.net_rx_monthly))
+const totalTx = computed(() => formatBytes(props.server.net_tx_monthly))
 
 const dataTimeText = computed(() => {
   const reportTimestamp = normalizeTimestamp(props.server.report_timestamp ?? props.server.last_updated)

@@ -269,7 +269,6 @@ const createEmptyMergedData = () => ({
   sysConfig: {
     show_price: true,
     show_expire: true,
-    show_bw: true,
     show_tf: true,
     show_time: true,
     site_title: DEFAULT_SITE_TITLE,
@@ -308,10 +307,9 @@ const mergeSiteResult = (mergedData, { data, error, baseUrl }, multiSite, localT
     mergedData.sysConfig = {
       show_price: data.sysConfig.show_price ?? mergedData.sysConfig.show_price,
       show_expire: data.sysConfig.show_expire ?? mergedData.sysConfig.show_expire,
-      show_bw: data.sysConfig.show_bw ?? mergedData.sysConfig.show_bw,
       show_tf: data.sysConfig.show_tf ?? mergedData.sysConfig.show_tf,
       show_time: data.sysConfig.show_time ?? mergedData.sysConfig.show_time,
-      site_title: multiSite ? localTitle : (data.sysConfig.site_title || mergedData.sysConfig.site_title),
+      site_title: multiSite ? localTitle : mergedData.sysConfig.site_title,
       backgroundImage: multiSite ? localBg : (data.sysConfig.backgroundImage || mergedData.sysConfig.backgroundImage || '')
     }
   }
@@ -344,7 +342,7 @@ export const fetchServerDetail = async (id, apiIndex = 0) => {
 }
 
 export const fetchAllHistory = async (id, hours, apiIndex = 0) => {
-  const result = await http.getByIndex(`/api/history/all?id=${id}&hours=${hours}`, apiIndex)
+  const result = await http.getByIndex(`/api/history/all?id=${id}&hours=${hours}`, apiIndex, { autoRedirect: false })
   if (result.error) {
     const error = new Error(result.error)
     error.code = result.code
@@ -352,7 +350,7 @@ export const fetchAllHistory = async (id, hours, apiIndex = 0) => {
     error.message = result.message || result.error
     throw error
   }
-  return result.data
+  return Array.isArray(result.data) ? result.data : []
 }
 
 export const adminApi = async (data, apiIndex = 0) => {
@@ -396,8 +394,8 @@ export const upgradeDatabase = async (apiIndex = 0) => {
   return result.data
 }
 
-export const rebuildDatabase = async (apiIndex = 0) => {
-  const result = await http.postByIndex('/rebuild', {}, apiIndex, { autoRedirect: false })
+export const clearHistory = async (apiIndex = 0) => {
+  const result = await http.postByIndex('/clearHistory', {}, apiIndex, { autoRedirect: false })
   if (result.error) {
     if (result.status === 401) {
       return { success: false, error: 'Unauthorized' }
