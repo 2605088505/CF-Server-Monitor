@@ -851,7 +851,7 @@ get_tcp_ping() {
     fi
 
     if command -v tcping >/dev/null 2>&1; then
-        rtt=$(tcping -c 1 "${host}" "${port}" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i~/ms$/){v=$i;gsub(/[^0-9.]/,"",v);if(v>0){print int(v+0.5);exit}}}')
+        rtt=$(tcping -c 1 -t 2 "${host}" "${port}" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i~/ms$/){v=$i;gsub(/[^0-9.]/,"",v);if(v>0){print int(v+0.5);exit}}}')
         [ -n "${rtt}" ] && [ "${rtt}" -gt 0 ] 2>/dev/null && { echo "${rtt}"; return; }
     fi
 
@@ -885,7 +885,7 @@ get_packet_loss() {
     fi
 
     if command -v tcping >/dev/null 2>&1; then
-        loss=$(tcping -c "$count" "$host" "$port" 2>/dev/null | awk -v cnt="$count" '{for(i=1;i<=NF;i++) if($i~/failed/){v=$(i-1);gsub(/[^0-9]/,"",v);if(v>=0){print int(v*100/cnt);exit}}}')
+        loss=$(tcping -c "$count" -t 2 "$host" "$port" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i~/^[0-9]+(\.[0-9]+)?%$/){gsub(/%/,"",$i);print int($i+0.5);exit}}')
         [ -n "$loss" ] && [ "$loss" -ge 0 ] 2>/dev/null && { echo "$loss"; return; }
     fi
 
