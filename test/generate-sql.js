@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS servers (
   reset_day INTEGER DEFAULT 1,
   collect_interval INTEGER DEFAULT 0,
   report_interval INTEGER DEFAULT 60,
-  ping_mode TEXT DEFAULT 'http',
+  auto_update TEXT DEFAULT '0',
   is_hidden TEXT DEFAULT '0',
   sort_order INTEGER DEFAULT 0
 );

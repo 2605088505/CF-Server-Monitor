@@ -1,5 +1,5 @@
 import { http, isAdminLoggedIn } from './http'
-import { getApiBases, getWsBase, hasMultipleApiBases, getTitle, getBackgroundImage } from './config'
+import { getApiBases, getWsBase, hasMultipleApiBases, getTitle } from './config'
 import { DEFAULT_SITE_TITLE } from './constants'
 import { ref } from 'vue'
 import { normalizeTimestamp } from './time.js'
@@ -8,6 +8,8 @@ import { TIME } from './constants'
 export { getApiBases, getWsBase }
 
 export const VERSION = ref('')
+export const LAST_WORKERS_VERSION = ref('')
+export const LAST_AGENT_VERSION = ref('')
 
 export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverIds = []) => {
   const { onUpdate, onStatus, onMessage } = handlers
@@ -201,7 +203,7 @@ export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverI
 
 export const getFlagRegionCode = (region) => {
   const code = (region || '').toUpperCase()
-  if (code === 'TW' || code === 'HK' || code === 'MO') return 'cn'
+  if (code === 'TW') return 'cn'
   return code.toLowerCase()
 }
 
@@ -249,14 +251,12 @@ export const fetchServersAll = async () => {
   const results = await http.getAll('/api/servers')
   const multiSite = hasMultipleApiBases()
   const localTitle = getTitle() || DEFAULT_SITE_TITLE
-  const localBg = getBackgroundImage()
 
   const mergedData = createEmptyMergedData()
   mergedData.sysConfig.site_title = multiSite ? localTitle : DEFAULT_SITE_TITLE
-  mergedData.sysConfig.backgroundImage = multiSite ? localBg : ''
 
   for (const result of results) {
-    mergeSiteResult(mergedData, result, multiSite, localTitle, localBg)
+    mergeSiteResult(mergedData, result, multiSite, localTitle)
   }
 
   return mergedData
@@ -271,12 +271,11 @@ const createEmptyMergedData = () => ({
     show_expire: true,
     show_tf: true,
     show_time: true,
-    site_title: DEFAULT_SITE_TITLE,
-    backgroundImage: ''
+    site_title: DEFAULT_SITE_TITLE
   }
 })
 
-const mergeSiteResult = (mergedData, { data, error, baseUrl }, multiSite, localTitle, localBg) => {
+const mergeSiteResult = (mergedData, { data, error, baseUrl }, multiSite, localTitle) => {
   if (error || !data) return
 
   const rawServers = Array.isArray(data.servers)
@@ -309,8 +308,7 @@ const mergeSiteResult = (mergedData, { data, error, baseUrl }, multiSite, localT
       show_expire: data.sysConfig.show_expire ?? mergedData.sysConfig.show_expire,
       show_tf: data.sysConfig.show_tf ?? mergedData.sysConfig.show_tf,
       show_time: data.sysConfig.show_time ?? mergedData.sysConfig.show_time,
-      site_title: multiSite ? localTitle : mergedData.sysConfig.site_title,
-      backgroundImage: multiSite ? localBg : (data.sysConfig.backgroundImage || mergedData.sysConfig.backgroundImage || '')
+      site_title: multiSite ? localTitle : mergedData.sysConfig.site_title
     }
   }
 }
@@ -318,16 +316,14 @@ const mergeSiteResult = (mergedData, { data, error, baseUrl }, multiSite, localT
 export const fetchServersAllWithProgress = async (onResult) => {
   const multiSite = hasMultipleApiBases()
   const localTitle = getTitle() || DEFAULT_SITE_TITLE
-  const localBg = getBackgroundImage()
 
   const mergedData = createEmptyMergedData()
   mergedData.sysConfig.site_title = multiSite ? localTitle : DEFAULT_SITE_TITLE
-  mergedData.sysConfig.backgroundImage = multiSite ? localBg : ''
 
   let corsErrorSites = []
 
   await http.getAllWithProgress('/api/servers', (result) => {
-    mergeSiteResult(mergedData, result, multiSite, localTitle, localBg)
+    mergeSiteResult(mergedData, result, multiSite, localTitle)
     if (result.corsError && !corsErrorSites.includes(result.baseUrl)) corsErrorSites.push(result.baseUrl)
     onResult({ ...mergedData, corsErrorSites })
   })
@@ -374,12 +370,14 @@ export const logout = () => {
   localStorage.removeItem('jwt_token')
 }
 
-export const fetchConfig = async () => {
-  const result = await http.get('/api/config', { includeAuth: true, includeTurnstile: false })
+export const fetchConfig = async (apiIndex = 0) => {
+  const result = await http.getByIndex('/api/config', apiIndex, { includeAuth: true, includeTurnstile: false })
   if (result.error) return null
   if (result.data && result.data.version) {
     VERSION.value = result.data.version
   }
+  LAST_WORKERS_VERSION.value = result.data?.last_workers_version || ''
+  LAST_AGENT_VERSION.value = result.data?.last_agent_version || ''
   return result.data
 }
 

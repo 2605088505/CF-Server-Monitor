@@ -36,6 +36,27 @@
             </textarea>
           </div>
         </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.cspStatic }}</label>
+            <input type="text" v-model="settings.csp_static" class="form-input" placeholder="https://unpkg.com,https://cdn.jsdelivr.net" @blur="validateCspField('csp_static')">
+            <p class="text-muted text-sm mt-1">{{ trans.cspStaticTip }}</p>
+            <p v-if="cspErrors.csp_static" class="text-danger text-sm">{{ cspErrors.csp_static }}</p>
+          </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.cspApi }}</label>
+            <input type="text" v-model="settings.csp_api" class="form-input" placeholder="https://api.example.com" @blur="validateCspField('csp_api')">
+            <p class="text-muted text-sm mt-1">{{ trans.cspApiTip }}</p>
+            <p v-if="cspErrors.csp_api" class="text-danger text-sm">{{ cspErrors.csp_api }}</p>
+          </div>
+        </div>
+
+        <p class="text-muted text-sm mt-2">
+          <span class="warning-icon">[i]</span>
+          {{ trans.cspWarning }}
+        </p>
       </div>
 
       <div class="settings-section">
@@ -297,36 +318,43 @@
         <div class="form-row">
           <div class="form-group flex-1">
             <label class="form-label">{{ trans.customCt }}</label>
-            <input type="text" v-model="settings.custom_ct" class="form-input" placeholder="gd-ct-dualstack.ip.zstaticcdn.com">
+            <input type="text" v-model.trim="settings.custom_ct" :class="['form-input', { 'input-invalid': pingNodeErrors.custom_ct }]" placeholder="gd-ct-dualstack.ip.zstaticcdn.com">
+            <p v-if="pingNodeErrors.custom_ct" class="text-red text-sm mt-1">{{ pingNodeErrors.custom_ct }}</p>
           </div>
 
           <div class="form-group flex-1">
             <label class="form-label">{{ trans.customCu }}</label>
-            <input type="text" v-model="settings.custom_cu" class="form-input" placeholder="gd-cu-dualstack.ip.zstaticcdn.com">
+            <input type="text" v-model.trim="settings.custom_cu" :class="['form-input', { 'input-invalid': pingNodeErrors.custom_cu }]" placeholder="gd-cu-dualstack.ip.zstaticcdn.com">
+            <p v-if="pingNodeErrors.custom_cu" class="text-red text-sm mt-1">{{ pingNodeErrors.custom_cu }}</p>
           </div>
         </div>
         <div class="form-row">
           <div class="form-group flex-1">
             <label class="form-label">{{ trans.customCm }}</label>
-            <input type="text" v-model="settings.custom_cm" class="form-input" placeholder="gd-cm-dualstack.ip.zstaticcdn.com">
+            <input type="text" v-model.trim="settings.custom_cm" :class="['form-input', { 'input-invalid': pingNodeErrors.custom_cm }]" placeholder="gd-cm-dualstack.ip.zstaticcdn.com">
+            <p v-if="pingNodeErrors.custom_cm" class="text-red text-sm mt-1">{{ pingNodeErrors.custom_cm }}</p>
           </div>
 
           <div class="form-group flex-1">
             <label class="form-label">{{ trans.customBd }}</label>
-            <input type="text" v-model="settings.custom_bd" class="form-input" placeholder="lf3-ips.zstaticcdn.com">
+            <input type="text" v-model.trim="settings.custom_bd" :class="['form-input', { 'input-invalid': pingNodeErrors.custom_bd }]" placeholder="lf3-ips.zstaticcdn.com">
+            <p v-if="pingNodeErrors.custom_bd" class="text-red text-sm mt-1">{{ pingNodeErrors.custom_bd }}</p>
           </div>
         </div>
       </div>
     </div>
 
     <div class="text-right mt-5">
-      <button @click="$emit('save-settings')" class="btn btn-primary btn-lg" :disabled="saving">{{ saving ? '⏳' : '💾' }} {{ saving ? trans.saving : trans.saveConfig }}</button>
+      <button @click="$emit('save-settings')" class="btn btn-primary btn-lg" :disabled="saving || hasPingNodeErrors">{{ saving ? '⏳' : '💾' }} {{ saving ? trans.saving : trans.saveConfig }}</button>
     </div>
   </div>
 </template>
 
 <script setup>
-defineProps({
+import { computed, reactive } from 'vue'
+import { PING_NODE_FIELDS, validatePingNode } from '../../../utils/pingNode.js'
+
+const props = defineProps({
   trans: { type: Object, required: true },
   settings: { type: Object, required: true },
   passwordVisible: { type: Object, required: true },
@@ -344,4 +372,57 @@ defineEmits([
   'save-settings', 'upload-bg',
   'send-test-notification', 'query-d1-usage'
 ])
+
+const cspErrors = reactive({
+  csp_static: '',
+  csp_api: ''
+})
+
+const pingNodeErrorMessage = computed(() => (
+  props.trans.invalidPingNodeFormat || 'Use domain, IPv4, or host:port. Port must be 1-65535.'
+))
+
+const pingNodeErrors = computed(() => Object.fromEntries(
+  PING_NODE_FIELDS.map(field => [
+    field,
+    validatePingNode(props.settings[field]).valid ? '' : pingNodeErrorMessage.value
+  ])
+))
+
+const hasPingNodeErrors = computed(() => Object.values(pingNodeErrors.value).some(Boolean))
+
+const validatePingNodes = () => !hasPingNodeErrors.value
+
+const isValidCspOrigin = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw || /[\s;"']/.test(raw)) return false
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'https:') return false
+    if (url.username || url.password || url.search || url.hash) return false
+    if (url.pathname && url.pathname !== '/') return false
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+const validateCspField = (field) => {
+  const value = props.settings[field] || ''
+  if (!value) {
+    cspErrors[field] = ''
+    return true
+  }
+  const domains = value.split(',').map(s => s.trim()).filter(Boolean)
+  for (const domain of domains) {
+    if (!isValidCspOrigin(domain)) {
+      cspErrors[field] = props.trans.cspInvalidDomain || 'Each domain must start with https://'
+      return false
+    }
+  }
+  cspErrors[field] = ''
+  return true
+}
+
+defineExpose({ validateCspField, cspErrors, validatePingNodes, pingNodeErrors })
 </script>
