@@ -176,7 +176,7 @@
           </div>
         </div>
 
-        <div v-if="settings.tg_notify === 'true' && settings.tg_bot_token" class="form-group">
+        <div v-if="isOfflineNotifyEnabled && settings.tg_bot_token" class="form-group">
           <div class="checkbox-item no-margin">
             <input type="checkbox" v-model="editForm.offline_notify_disabled">
             <label>
@@ -229,6 +229,20 @@ const cycleLabel = (item) => currentLang.value === 'zh' ? item.labelZh : item.la
 const currencyLabel = (item) => currentLang.value === 'zh'
   ? `${item.symbol} ${item.nameZh}`
   : `${item.symbol} ${item.nameEn}`
+
+const normalizeTgNotifySetting = (value) => {
+  if (value === true || value === 'true') return '5'
+  if (value === false || value === 'false' || value === undefined || value === null || value === '') return '0'
+
+  const minutes = Number(value)
+  if (Number.isInteger(minutes) && (minutes === 0 || (minutes >= 2 && minutes <= 30))) {
+    return String(minutes)
+  }
+
+  return '0'
+}
+
+const isOfflineNotifyEnabled = computed(() => normalizeTgNotifySetting(props.settings.tg_notify) !== '0')
 
 const normalizePriceInput = () => {
   editForm.value.price = normalizePrice(editForm.value.price)

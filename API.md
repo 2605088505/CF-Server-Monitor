@@ -908,7 +908,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled === 
     "show_expire": "true",
     "show_tf": "true",
     "show_long_history": "true",
-    "tg_notify": "false",
+    "tg_notify": "0",
     "tg_bot_token": "",
     "tg_chat_id": "",
     "turnstile_enabled": "false",
@@ -1223,7 +1223,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled === 
   show_expire: 'true' | 'false',
   show_tf: 'true' | 'false',
   show_long_history: 'true' | 'false',
-  tg_notify: 'true' | 'false',
+  tg_notify: '0' | '2' ... '30',    // 0 = 关闭；旧值 false 兼容为 0，true 兼容为 5
   tg_bot_token: string,
   tg_chat_id: string,
   turnstile_enabled: 'true' | 'false',
