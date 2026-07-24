@@ -368,6 +368,10 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   "turnstile_verified": "BASE64_AES_GCM_ENCRYPTED_STRING_OR_NULL",
   "last_workers_version": "V2.7.11 Beta",
   "last_agent_version": "1.3.0",
+  "theme_options": {
+    "a": 1,
+    "b": 2
+  },
   "show_long_history": true
 }
 ```
@@ -381,6 +385,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 | `turnstile_verified` | string\|null | 当次验证成功后回写给客户端的"已验证凭证"，客户端应回存并在 1 小时内复用 |
 | `last_workers_version` | string\|null | 登录时返回远程最新 Workers 版本；来源为 GitHub `version.json`，后端缓存 5 分钟 |
 | `last_agent_version` | string\|null | 登录时返回远程最新 Agent 版本；来源为 GitHub `version.json`，后端缓存 5 分钟 |
+| `theme_options`      | object       | 第三方主题自定义配置；未配置时为空对象，匿名请求也会返回 |
 | `show_long_history`  | boolean      | 是否允许查看超过 1 小时的历史曲线（未登录用户**强制** 1 小时上限） |
 
 > `X-Turnstile-Token` 携带且验证成功时，响应头会同步设置 `X-Turnstile-Verified`（加密串）。
@@ -445,7 +450,10 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   "id": "9b2c...",
   "name": "HK-01",
   "server_group": "HK",
-  "price": "￥30/月",
+  "price": "30.00",
+  "billing_cycle": "month",
+  "auto_renewal": "0",
+  "currency": "¥",
   "expire_date": "2026-12-31",
   "traffic_limit": "1TB",
   "traffic_calc_type": "total",
@@ -889,12 +897,18 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled === 
     "custom_bg": "https://...",
     "custom_head": "<style>...</style>",
     "custom_script": "console.log('hi');",
+    "appearance_options": {
+      "theme_options": {
+        "a": 1,
+        "b": 2
+      }
+    },
     "is_public": "true",
     "show_price": "true",
     "show_expire": "true",
     "show_tf": "true",
     "show_long_history": "true",
-    "tg_notify": "false",
+    "tg_notify": "0",
     "tg_bot_token": "",
     "tg_chat_id": "",
     "turnstile_enabled": "false",
@@ -908,7 +922,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled === 
     "custom_ct": "gd-ct-dualstack.ip.zstaticcdn.com",
     "custom_cu": "gd-cu-dualstack.ip.zstaticcdn.com",
     "custom_cm": "gd-cm-dualstack.ip.zstaticcdn.com",
-    "custom_bd": "lf3-ips.zstaticcdn.com",
+    "custom_bd": "ip.zstaticcdn.com",
     "expire_reminder": "false"
   }
 }
@@ -916,7 +930,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled === 
 
 **字段分类**：
 
-- `APPEARANCE_FIELDS`（写入 `appearance_options` JSON）：`site_title`、`custom_bg`、`custom_head`、`custom_script`
+- `APPEARANCE_FIELDS`（写入 `appearance_options` JSON）：`site_title`、`custom_bg`、`custom_head`、`custom_script`、`csp_static`、`csp_api`、`display_mode`、`theme_options`
 - `SITE_FIELDS`（写入 `site_options` JSON）：上表除 appearance 之外的全部
 - 任何未列出的字段会被忽略
 
@@ -970,7 +984,10 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled === 
   "id": "<server UUID>",
   "name": "HK-01",                   // 可选，1~100 字符
   "server_group": "HK",               // 默认 "Default"
-  "price": "￥30/月",                  // 字符串
+  "price": "30.00",                   // 字符串，保存时自动转换为两位小数；"0" 或 "-1" 表示免费，空白表示未设置
+  "billing_cycle": "month",            // month | quarter | half_year | year | two_years | three_years | four_years | five_years
+  "auto_renewal": "0",                 // "0" | "1"
+  "currency": "¥",                     // ¥ | $ | € | £ | ₽ | ₣ | ₹ | ₫ | ฿
   "expire_date": "2026-12-31",
   "traffic_limit": "1TB",
   "traffic_calc_type": "total",       // total | ...
@@ -1135,7 +1152,10 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled === 
 | `id`                                          | string (UUID)      | 主键                        |
 | `name`                                        | string             | 显示名                       |
 | `server_group`                                | string             | 分组                        |
-| `price`                                       | string             | 价格文本（自由格式）                |
+| `price`                                       | string             | 价格金额文本，保存时规范为两位小数；`0` 或 `-1` 表示免费，空白表示未设置 |
+| `billing_cycle`                               | string             | `month` / `quarter` / `half_year` / `year` / `two_years` / `three_years` / `four_years` / `five_years` |
+| `auto_renewal`                                | string `"0"`/`"1"` | 是否启用自动续费                    |
+| `currency`                                    | string             | 货币符号：`¥` 人民币、`$` 美元、`€` 欧元、`£` 英镑、`₽` 卢布、`₣` 法郎、`₹` 卢比、`₫` 越南盾、`฿` 泰铢 |
 | `expire_date`                                 | string             | 到期日 `YYYY-MM-DD`          |
 | `traffic_limit`                               | string             | 流量上限文本                    |
 | `traffic_calc_type`                           | string             | `total` / 其他              |
@@ -1196,12 +1216,14 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled === 
   custom_bg: string,
   custom_head: string,           // 注入到 </head> 之前
   custom_script: string,         // 注入到 </body> 之前
+  display_mode: 'bar' | 'ring' | 'table',
+  theme_options: Record<string, unknown>,
   is_public: 'true' | 'false',
   show_price: 'true' | 'false',
   show_expire: 'true' | 'false',
   show_tf: 'true' | 'false',
   show_long_history: 'true' | 'false',
-  tg_notify: 'true' | 'false',
+  tg_notify: '0' | '2' ... '30',    // 0 = 关闭；旧值 false 兼容为 0，true 兼容为 5
   tg_bot_token: string,
   tg_chat_id: string,
   turnstile_enabled: 'true' | 'false',
@@ -1351,7 +1373,7 @@ curl -X POST https://status.example.com/admin/api \
 curl -X POST https://status.example.com/admin/api \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"action":"edit","id":"9b2c4d3e-1a2b-4c5d-9e8f-7a6b5c4d3e2f","price":"￥35/月","expire_date":"2027-01-01"}'
+  -d '{"action":"edit","id":"9b2c4d3e-1a2b-4c5d-9e8f-7a6b5c4d3e2f","price":"35.00","billing_cycle":"month","auto_renewal":"1","currency":"¥","expire_date":"2027-01-01"}'
 ```
 
 ### 8.10 管理：删除

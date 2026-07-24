@@ -1,19 +1,37 @@
 import { checkAuth, simpleAuthResponse, validateCredentials, generateToken } from '../middleware/auth.js';
 import { getLatestMetricsForAllServers } from '../database/schema.js';
 import { getAllServers, clearServersListCache } from '../utils/cache.js';
-import { clearAppearanceSettingsCache, saveSiteOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
+import { clearAppearanceSettingsCache, normalizeDisplayMode, normalizeTgNotify, saveSiteOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
 import { mergeMetricsIntoServer } from '../utils/metrics.js';
 import { verifyTurnstileToken, hashPassword } from '../utils/common.js';
 import { AppError, createSuccessResponse, createBadRequestResponse, createUnauthorizedResponse, createErrorResponse } from '../utils/errors.js';
 import { addServerColumns } from '../database/updateDatabase.js';
 import { sendNotification } from '../services/notification.js';
-import { getNextServerHistoryPartitionId } from '../database/indexOptimization.js';
+import { getNextServerHistoryPartitionId, HISTORY_MAX_PARTITION_ID } from '../database/indexOptimization.js';
 import { isValidTrafficCorrection, validateAgentConfigInput, validatePingNode } from '../utils/agentConfig.js';
+import { detectBillingCycle, detectCurrencySymbol, normalizeBillingCycle, normalizeCurrency, normalizePrice, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
 
 const PING_NODE_FIELDS = ['custom_ct', 'custom_cu', 'custom_cm', 'custom_bd'];
 
 function normalizeBooleanFlag(value) {
   return value === true || value === 1 || value === '1' || value === 'true' ? '1' : '0';
+}
+
+function normalizeServerBillingData(data = {}) {
+  const billingCycle = normalizeBillingCycle(data.billing_cycle || detectBillingCycle(data.price));
+  const autoRenewal = normalizeBooleanFlag(data.auto_renewal);
+
+  return {
+    price: normalizePrice(data.price),
+    billing_cycle: billingCycle,
+    auto_renewal: autoRenewal,
+    currency: normalizeCurrency(data.currency || detectCurrencySymbol(data.price) || '¥'),
+    expire_date: renewExpireDateIfNeeded(
+      data.expire_date || '',
+      billingCycle,
+      autoRenewal
+    ).expire_date
+  };
 }
 
 function isValidUUID(id) {
@@ -239,8 +257,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
 
       try {
         const token = await generateToken(env, sys);
-        return createSuccessResponse({ 
-          success: true, 
+        return createSuccessResponse({
+          success: true,
           token: token,
           message: 'loginSuccessful'
         });
@@ -373,7 +391,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       }
 
       // 如果 tg_notify 或 expire_reminder 开启，验证 tg_bot_token 不为空
-      if (settings.tg_notify === 'true' || settings.expire_reminder === 'true') {
+      const tgNotify = normalizeTgNotify(settings.tg_notify);
+      if (tgNotify !== '0' || settings.expire_reminder === 'true') {
         if (!settings.tg_bot_token || settings.tg_bot_token.trim().length === 0) {
           return createBadRequestResponse('tgBotTokenRequired');
         }
@@ -384,14 +403,31 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
         return createBadRequestResponse('invalidPingNodeFormat');
       }
 
+      if (settings.appearance_options !== undefined && (
+        settings.appearance_options === null ||
+        typeof settings.appearance_options !== 'object' ||
+        Array.isArray(settings.appearance_options)
+      )) {
+        return createBadRequestResponse('invalidThemeOptionsFormat');
+      }
+
+      const nestedAppearanceOptions = settings.appearance_options || {};
       const appearanceOptions = {};
       for (const field of APPEARANCE_FIELDS) {
-        if (settings[field] !== undefined) {
+        const value = field === 'theme_options' ? nestedAppearanceOptions.theme_options : settings[field];
+        if (value !== undefined) {
           // CSP 字段格式校验：只允许 https:// 开头的域名，逗号分隔
           if (field === 'csp_static' || field === 'csp_api') {
-            appearanceOptions[field] = sanitizeCspDomains(settings[field]);
+            appearanceOptions[field] = sanitizeCspDomains(value);
+          } else if (field === 'display_mode') {
+            appearanceOptions[field] = normalizeDisplayMode(value);
+          } else if (field === 'theme_options') {
+            if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+              return createBadRequestResponse('invalidThemeOptionsFormat');
+            }
+            appearanceOptions[field] = value;
           } else {
-            appearanceOptions[field] = settings[field];
+            appearanceOptions[field] = value;
           }
         }
       }
@@ -409,6 +445,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
             }
           } else if (PING_NODE_FIELDS.includes(field)) {
             siteOptions[field] = pingNodes.values[field];
+          } else if (field === 'tg_notify') {
+            siteOptions[field] = tgNotify;
           } else {
             siteOptions[field] = settings[field];
           }
@@ -485,7 +523,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       });
     }
     else if (data.action === 'edit') {
-      const { id, name, server_group, tags, note, price, expire_date, traffic_limit, traffic_calc_type, reset_day, collect_interval, report_interval, auto_update, custom_ct, custom_cu, custom_cm, custom_bd, rx_correction, tx_correction, offline_notify_disabled, is_hidden } = data;
+      const { id, name, server_group, tags, note, price, billing_cycle, auto_renewal, currency, expire_date, traffic_limit, traffic_calc_type, reset_day, collect_interval, report_interval, auto_update, custom_ct, custom_cu, custom_cm, custom_bd, rx_correction, tx_correction, offline_notify_disabled, is_hidden } = data;
       if (!id || !isValidUUID(id)) {
         return createBadRequestResponse('invalidServerId');
       }
@@ -520,19 +558,30 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       if (safeRx === undefined || safeTx === undefined) {
         return createBadRequestResponse('invalidTrafficCorrection');
       }
+
+      const billingData = normalizeServerBillingData({
+        price,
+        billing_cycle,
+        auto_renewal,
+        currency,
+        expire_date
+      });
       
       try {
         await env.DB.prepare(`
           UPDATE servers
-          SET name = ?, server_group = ?, tags = ?, note = ?, price = ?, expire_date = ?, traffic_limit = ?, traffic_calc_type = ?, reset_day = ?, collect_interval = ?, report_interval = ?, auto_update = ?, custom_ct = ?, custom_cu = ?, custom_cm = ?, custom_bd = ?, rx_correction = ?, tx_correction = ?, offline_notify_disabled = ?, is_hidden = ?
+          SET name = ?, server_group = ?, tags = ?, note = ?, price = ?, billing_cycle = ?, auto_renewal = ?, currency = ?, expire_date = ?, traffic_limit = ?, traffic_calc_type = ?, reset_day = ?, collect_interval = ?, report_interval = ?, auto_update = ?, custom_ct = ?, custom_cu = ?, custom_cm = ?, custom_bd = ?, rx_correction = ?, tx_correction = ?, offline_notify_disabled = ?, is_hidden = ?
           WHERE id = ?
         `).bind(
           name || '',
           server_group || 'Default',
           safeTags,
           safeNote,
-          price || '',
-          expire_date || '',
+          billingData.price,
+          billingData.billing_cycle,
+          billingData.auto_renewal,
+          billingData.currency,
+          billingData.expire_date,
           traffic_limit || '',
           traffic_calc_type || 'total',
           normalizedAgentConfig.reset_day,
@@ -588,6 +637,125 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       return createSuccessResponse({ 
         success: true, 
         message: 'batchDeleted'
+      });
+    }
+    
+    else if (data.action === 'export_servers') {
+      try {
+        const servers = await env.DB.prepare('SELECT * FROM servers ORDER BY sort_order ASC').all();
+        return createSuccessResponse({
+          success: true,
+          servers: servers.results || [],
+          message: 'serversExported'
+        });
+      } catch (e) {
+        return createBadRequestResponse('serversExportFailed');
+      }
+    }
+    else if (data.action === 'import_servers') {
+      const { servers: importData } = data;
+      if (!importData || !Array.isArray(importData) || importData.length === 0) {
+        return createBadRequestResponse('noServersToImport');
+      }
+
+      const existingServers = await env.DB.prepare('SELECT id FROM servers').all();
+      const existingIds = new Set((existingServers.results || []).map(s => s.id));
+
+      const existingPartitionIds = await env.DB.prepare('SELECT history_partition_id FROM servers').all();
+      const usedPartitionIds = new Set(
+        (existingPartitionIds.results || []).map(s => s.history_partition_id).filter(id => id > 0)
+      );
+
+      let imported = 0;
+      let skipped = 0;
+      const skippedIds = [];
+
+      for (const server of importData) {
+        if (!server.id || !isValidUUID(server.id)) {
+          skipped++;
+          skippedIds.push(server.id || '(invalid)');
+          continue;
+        }
+
+        if (existingIds.has(server.id)) {
+          skipped++;
+          skippedIds.push(server.id);
+          continue;
+        }
+
+        let partitionId = Number(server.history_partition_id) || 0;
+        if (partitionId <= 0 || partitionId > HISTORY_MAX_PARTITION_ID || usedPartitionIds.has(partitionId)) {
+          partitionId = 0;
+          for (let id = 1; id <= HISTORY_MAX_PARTITION_ID; id++) {
+            if (!usedPartitionIds.has(id)) {
+              partitionId = id;
+              break;
+            }
+          }
+          if (partitionId === 0) {
+            skipped++;
+            skippedIds.push(server.id);
+            continue;
+          }
+        }
+
+        usedPartitionIds.add(partitionId);
+        existingIds.add(server.id);
+
+        const billingData = normalizeServerBillingData(server);
+
+        try {
+          await env.DB.prepare(`
+            INSERT INTO servers (id, name, server_group, tags, note, price, billing_cycle, auto_renewal,
+              currency, expire_date,
+              traffic_limit, traffic_calc_type, reset_day, collect_interval, report_interval,
+              auto_update, custom_ct, custom_cu, custom_cm, custom_bd, rx_correction, tx_correction,
+              offline_notify_disabled, is_hidden, sort_order, history_partition_id, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            server.id,
+            server.name || '',
+            server.server_group || 'Default',
+            server.tags || '',
+            server.note || '',
+            billingData.price,
+            billingData.billing_cycle,
+            billingData.auto_renewal,
+            billingData.currency,
+            billingData.expire_date,
+            server.traffic_limit || '',
+            server.traffic_calc_type || 'total',
+            server.reset_day ?? 1,
+            server.collect_interval ?? 0,
+            server.report_interval ?? 60,
+            normalizeBooleanFlag(server.auto_update),
+            server.custom_ct || '',
+            server.custom_cu || '',
+            server.custom_cm || '',
+            server.custom_bd || '',
+            server.rx_correction ?? null,
+            server.tx_correction ?? null,
+            normalizeBooleanFlag(server.offline_notify_disabled),
+            normalizeBooleanFlag(server.is_hidden),
+            server.sort_order ?? 0,
+            partitionId,
+            server.timestamp || Date.now()
+          ).run();
+          imported++;
+        } catch (e) {
+          skipped++;
+          skippedIds.push(server.id);
+        }
+      }
+
+      clearServersListCache();
+
+      return createSuccessResponse({
+        success: true,
+        imported,
+        skipped,
+        skippedIds,
+        message: imported > 0 ? 'serversImported' : 'noServersImported'
       });
     }
     

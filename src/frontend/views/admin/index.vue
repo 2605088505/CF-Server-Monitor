@@ -143,6 +143,7 @@
           :trans="trans"
           :active-tab="activeTab"
           :db-loading="dbLoading"
+          :selected-api-index="selectedApiIndex"
           @open-db-modal="openDbModal"
         />
       </div>
@@ -448,8 +449,10 @@ import { adminApi, login, logout as apiLogout, upgradeDatabase, clearHistory, ge
 import { hasMultipleApiBases } from '../../utils/config.js'
 import { t, useTranslation } from '../../utils/i18n'
 import { PING_NODE_FIELDS, validatePingNode } from '../../utils/pingNode.js'
+import { normalizeDisplayMode, resolveDisplayMode } from '../../utils/displayMode.js'
 import { usePasswordVisibility } from '../../composables/usePasswordVisibility'
 import { useTurnstile } from './composables/useTurnstile'
+import { detectBillingCycle, detectCurrencySymbol, normalizeBillingCycle, normalizeCurrency, normalizePrice, renewExpireDateIfNeeded } from '../../../utils/serverBilling.js'
 
 const trans = useTranslation()
 const route = useRoute()
@@ -461,6 +464,45 @@ const getMessage = (msg) => {
     return translated !== msg ? translated : msg
   }
   return ''
+}
+
+const normalizeTgNotifySetting = (value) => {
+  if (value === true || value === 'true') return '5'
+  if (value === false || value === 'false' || value === undefined || value === null || value === '') return '0'
+
+  const minutes = Number(value)
+  if (Number.isInteger(minutes) && (minutes === 0 || (minutes >= 2 && minutes <= 30))) {
+    return String(minutes)
+  }
+
+  return '0'
+}
+
+const isTgNotifyEnabled = (value) => normalizeTgNotifySetting(value) !== '0'
+
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+const formatThemeOptions = (value) => {
+  const normalized = value === undefined || value === null ? {} : value
+  try {
+    return JSON.stringify(normalized, null, 2)
+  } catch (_) {
+    return '{}'
+  }
+}
+
+const parseThemeOptions = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return { valid: true, value: {} }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!isPlainObject(parsed)) {
+      return { valid: false }
+    }
+    return { valid: true, value: parsed }
+  } catch (_) {
+    return { valid: false }
+  }
 }
 
 const formatNumber = (value) => Number(value || 0).toLocaleString()
@@ -513,13 +555,15 @@ const settings = ref({
   custom_bg: '',
   custom_head: '',
   custom_script: '',
+  display_mode: 'bar',
+  theme_options: '{}',
   is_public: false,
   show_price: true,
   show_expire: true,
   show_tf: true,
   show_time: true,
   show_long_history: false,
-  tg_notify: 'false',
+  tg_notify: '0',
   expire_reminder: 'false',
   tg_bot_token: '',
   tg_chat_id: '',
@@ -573,6 +617,9 @@ const editForm = ref({
   tags: '',
   note: '',
   price: '',
+  billing_cycle: 'month',
+  auto_renewal: false,
+  currency: '¥',
   expire_date: '',
   traffic_limit: '',
   traffic_calc_type: 'total',
@@ -598,6 +645,7 @@ const copiedNoteServerId = ref(null)
 const deleteTargetOs = ref('linux')
 const uninstallCopied = ref(false)
 const saving = ref(false)
+
 
 const showDbModal = ref(false)
 const dbOperation = ref('')
@@ -823,13 +871,15 @@ const loadSettings = async () => {
         custom_bg: settingsData.custom_bg || '',
         custom_head: settingsData.custom_head || '',
         custom_script: settingsData.custom_script || '',
+        display_mode: resolveDisplayMode(settingsData),
+        theme_options: formatThemeOptions(settingsData.theme_options),
         is_public: settingsData.is_public === 'true',
         show_price: settingsData.show_price === 'true',
         show_expire: settingsData.show_expire === 'true',
         show_tf: settingsData.show_tf === 'true',
         show_time: settingsData.show_time === 'true',
         show_long_history: settingsData.show_long_history === 'true',
-        tg_notify: settingsData.tg_notify || 'false',
+        tg_notify: normalizeTgNotifySetting(settingsData.tg_notify),
         expire_reminder: settingsData.expire_reminder || 'false',
         tg_bot_token: settingsData.tg_bot_token || '',
         tg_chat_id: settingsData.tg_chat_id || '',
@@ -902,7 +952,7 @@ const saveSettings = async () => {
     }
   }
 
-  if (settings.value.tg_notify === 'true' || settings.value.expire_reminder === 'true') {
+  if (isTgNotifyEnabled(settings.value.tg_notify) || settings.value.expire_reminder === 'true') {
     if (!settings.value.tg_bot_token || settings.value.tg_bot_token.trim().length === 0) {
       validationError.value = trans.value.tgBotTokenRequired
       return
@@ -912,6 +962,12 @@ const saveSettings = async () => {
   const pingNodeValidation = getPingNodeValidation(settings.value)
   if (!pingNodeValidation.valid) {
     validationError.value = buildPingNodeError(pingNodeValidation.field)
+    return
+  }
+
+  const themeOptionsResult = parseThemeOptions(settings.value.theme_options)
+  if (!themeOptionsResult.valid) {
+    validationError.value = trans.value.invalidThemeOptionsFormat
     return
   }
 
@@ -933,13 +989,17 @@ const saveSettings = async () => {
       custom_bg: settings.value.custom_bg,
       custom_head: settings.value.custom_head,
       custom_script: settings.value.custom_script,
+      display_mode: normalizeDisplayMode(settings.value.display_mode),
+      appearance_options: {
+        theme_options: themeOptionsResult.value
+      },
       is_public: settings.value.is_public ? 'true' : 'false',
       show_price: settings.value.show_price ? 'true' : 'false',
       show_expire: settings.value.show_expire ? 'true' : 'false',
       show_tf: settings.value.show_tf ? 'true' : 'false',
       show_time: settings.value.show_time ? 'true' : 'false',
       show_long_history: settings.value.show_long_history ? 'true' : 'false',
-      tg_notify: settings.value.tg_notify,
+      tg_notify: normalizeTgNotifySetting(settings.value.tg_notify),
       expire_reminder: settings.value.expire_reminder,
       tg_bot_token: settings.value.tg_bot_token,
       tg_chat_id: settings.value.tg_chat_id,
@@ -1045,6 +1105,7 @@ const getUninstallCommand = () => {
   const script = deleteTargetOs.value === 'alpine' ? 'install-alpine.sh'
     : deleteTargetOs.value === 'openwrt' ? 'install-openwrt.sh'
     : deleteTargetOs.value === 'mac' ? 'install-mac.sh'
+    : deleteTargetOs.value === 'synology' ? 'install-synology.sh'
     : 'install.sh'
   return `curl -sL ${HOST}/${script} | ${sudoPrefix}${shell} -s uninstall`
 }
@@ -1097,6 +1158,7 @@ const getCustomInstallCommand = () => {
   const script = targetOs.value === 'alpine' ? 'install-alpine.sh'
     : targetOs.value === 'openwrt' ? 'install-openwrt.sh'
     : targetOs.value === 'mac' ? 'install-mac.sh'
+    : targetOs.value === 'synology' ? 'install-synology.sh'
     : 'install.sh'
   let cmd = `curl -sL ${HOST}/${script} | ${sudoPrefix}${shell} -s install -id=${copyServerId.value} -secret='${apiSecret.value}' -url=${HOST}/update -collect_interval=${collectInterval.value} -interval=${reportInterval.value} -reset_day=${resetDay.value ?? 1} -auto_update=${autoUpdateFlag}`
   if (customCt.value) cmd += ` -ct=${customCt.value}`
@@ -1155,7 +1217,10 @@ const openEditModal = (server) => {
     server_group: server.server_group || '',
     tags: server.tags || '',
     note: server.note || '',
-    price: server.price || '',
+    price: normalizePrice(server.price),
+    billing_cycle: normalizeBillingCycle(detectBillingCycle(server.price) || server.billing_cycle),
+    auto_renewal: server.auto_renewal === '1' || server.auto_renewal === 1 || server.auto_renewal === true,
+    currency: normalizeCurrency(server.currency || detectCurrencySymbol(server.price) || '¥'),
     expire_date: server.expire_date || '',
     traffic_limit: server.traffic_limit || '',
     traffic_calc_type: server.traffic_calc_type || 'total',
@@ -1213,6 +1278,21 @@ const saveEdit = async () => {
     return
   }
 
+  const normalizedBillingCycle = normalizeBillingCycle(editForm.value.billing_cycle)
+  const normalizedAutoRenewal = editForm.value.auto_renewal ? '1' : '0'
+  const normalizedPrice = normalizePrice(editForm.value.price)
+  const normalizedCurrency = normalizeCurrency(editForm.value.currency || detectCurrencySymbol(editForm.value.price) || '¥')
+  const normalizedExpireDate = renewExpireDateIfNeeded(
+    editForm.value.expire_date,
+    normalizedBillingCycle,
+    normalizedAutoRenewal
+  ).expire_date
+
+  editForm.value.price = normalizedPrice
+  editForm.value.currency = normalizedCurrency
+  editForm.value.billing_cycle = normalizedBillingCycle
+  editForm.value.expire_date = normalizedExpireDate
+
   const data = {
     action: 'edit',
     id: editForm.value.id,
@@ -1220,8 +1300,11 @@ const saveEdit = async () => {
     server_group: editForm.value.server_group,
     tags: editForm.value.tags,
     note: editForm.value.note,
-    price: editForm.value.price,
-    expire_date: editForm.value.expire_date,
+    price: normalizedPrice,
+    billing_cycle: normalizedBillingCycle,
+    auto_renewal: normalizedAutoRenewal,
+    currency: normalizedCurrency,
+    expire_date: normalizedExpireDate,
     traffic_limit: editForm.value.traffic_limit,
     traffic_calc_type: editForm.value.traffic_calc_type,
     reset_day: editForm.value.reset_day,

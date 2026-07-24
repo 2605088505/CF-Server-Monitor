@@ -69,7 +69,7 @@ https://localhost:5173,https://[你的github用户名].github.io
 npm run build:github-page
 ```
 
-`csp_api` 和 `csp_static` 不会从 `/api/config` 暴露给前端。Worker/Pages 部署时它们由后台外观设置保存，并在服务端返回 HTML 时注入 CSP；纯静态构建时使用上面的 `CSP_API` / `CSP_STATIC` 环境变量注入。
+`csp_api` 和 `csp_static` 由后台外观设置保存，并在服务端返回 HTML 时注入 CSP；纯静态构建时使用上面的 `CSP_API` / `CSP_STATIC` 环境变量注入。
 
 ### 0.2 版本升级提示
 
@@ -147,6 +147,10 @@ Headers: (可选) Authorization: Bearer <jwt>, X-Turnstile-Token / X-Turnstile-V
   "turnstile_login_enabled": true,
   "turnstile_site_key": "1x00000000000000000000AA",
   "site_title": "My Server Monitor",
+  "theme_options": {
+    "a": 1,
+    "b": 2
+  },
   "verified": false,
   "turnstile_verified": null,
   "show_long_history": true
@@ -166,11 +170,12 @@ Headers: (可选) Authorization: Bearer <jwt>, X-Turnstile-Token / X-Turnstile-V
 | `turnstile_login_enabled` | boolean | 是否启用登录页人机验证 |
 | `turnstile_site_key` | string       | Turnstile 前端公钥  |
 | `site_title`         | string       | 站点标题 |
+| `theme_options`      | object       | 第三方主题自定义配置；未配置时为空对象 |
 | `verified`           | boolean      | 当前请求是否已验证       |
 | `turnstile_verified` | string\|null | 已验证凭证，缓存复用 1 小时 |
 | `show_long_history`  | boolean      | 是否允许查看超过 1 小时历史 |
 
-`/api/config` 不返回 `csp_api` / `csp_static`。CSP 白名单属于 HTML 生成阶段配置，不是前端运行时配置。
+第三方主题如需保存自定义配置，仍使用后台 `save_settings` 接口，并把对象放在 `settings.appearance_options.theme_options`，例如 `{"appearance_options":{"theme_options":{"a":1,"b":2}}}`。
 
 **示例**：
 
@@ -251,7 +256,10 @@ Headers: (按需) Authorization, X-Turnstile-Token/Verified
   "name": "HK-01",
   "server_group": "HK",
   "tags": "prod,edge",
-  "price": "￥30/月",
+  "price": "30.00",
+  "billing_cycle": "month",
+  "auto_renewal": "0",
+  "currency": "¥",
   "expire_date": "2026-12-31",
   "traffic_limit": "1TB",
   "traffic_calc_type": "total",
@@ -472,7 +480,10 @@ interface Server {
   name: string;
   server_group: string;
   tags: string;
-  price: string;
+  price: string; // "0" 或 "-1" 表示免费，空白表示未设置
+  billing_cycle: string;
+  auto_renewal: string;
+  currency: string;
   expire_date: string;
   traffic_limit: string;
   traffic_calc_type: string;
@@ -558,7 +569,7 @@ interface Settings {
   show_tf: 'true' | 'false';
   show_time: 'true' | 'false';
   show_long_history: 'true' | 'false';
-  tg_notify: 'true' | 'false';
+  tg_notify: '0' | '2' ... '30'; // 0 = 关闭；旧值 false 兼容为 0，true 兼容为 5
   tg_bot_token: string;
   tg_chat_id: string;
   turnstile_enabled: 'true' | 'false';

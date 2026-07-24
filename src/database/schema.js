@@ -1,5 +1,6 @@
 import { getAllServers, getLatestMetricsCache, setLatestMetricsCache, getMetricsHistoryCache, setMetricsHistoryCache, getCacheDuration, clearAllCaches } from '../utils/cache.js';
 import { saveSiteOptions, debug, getSettingByKey } from '../utils/settings.js';
+import { isDisabledProbeMetric, normalizeProbeMetricRow } from '../utils/metrics.js';
 import { ensureServerOptimization, buildHistoryId, getServerHistoryInfo, getHistoryIdRange } from './indexOptimization.js';
 import { addHistoryColumns, ensureHistoryIndex, isHistoryOptimized } from './updateDatabase.js';
 
@@ -38,6 +39,9 @@ export async function initDatabase(db) {
           tags TEXT DEFAULT '',
           note TEXT DEFAULT '',
           price TEXT DEFAULT '',
+          billing_cycle TEXT DEFAULT 'month',
+          auto_renewal TEXT DEFAULT '0',
+          currency TEXT DEFAULT '¥',
           expire_date TEXT DEFAULT '',
           traffic_limit TEXT DEFAULT '',
           traffic_calc_type TEXT DEFAULT 'total',
@@ -99,7 +103,6 @@ export async function initDatabase(db) {
           disk_used REAL DEFAULT 0,
           cpu_cores INTEGER DEFAULT 0,
           cpu_info TEXT DEFAULT '',
-          gpu REAL DEFAULT NULL,
           gpu_info TEXT DEFAULT '',
           arch TEXT DEFAULT '',
           os TEXT DEFAULT '',
@@ -286,7 +289,7 @@ export async function getMetricsHistory(db, serverId, hours, columns, server = n
     WHERE rn = 1
   `).bind(...bindValues).all();
 
-  const result = rawResult.results.map(row => ({
+  const result = rawResult.results.map(row => normalizeProbeMetricRow({
     ...row,
     timestamp: Number(row.timestamp)
   }));
@@ -353,14 +356,16 @@ export async function saveMetricsHistory(db, serverId, historyPartitionId, metri
     ? (rawTimestamp < 10000000000 ? rawTimestamp * 1000 : rawTimestamp)
     : Date.now();
 
+  const DISABLED_PROBE_VALUE = 'false';
+
   const parsePing = (val) => {
-    if (val === '' || val === null || val === undefined) return null;
+    if (isDisabledProbeMetric(val)) return DISABLED_PROBE_VALUE;
     const num = parseInt(val);
     return (num > 0) ? num : null;
   };
 
   const parseLoss = (val) => {
-    if (val === '' || val === null || val === undefined) return null;
+    if (isDisabledProbeMetric(val)) return DISABLED_PROBE_VALUE;
     const num = parseInt(val);
     if (Number.isNaN(num)) return null;
     return Math.max(0, Math.min(100, num));
@@ -376,7 +381,7 @@ export async function saveMetricsHistory(db, serverId, historyPartitionId, metri
       loss_ct, loss_cu, loss_cm, loss_bd,
       ram_total, ram_used, swap_total, swap_used,
       disk_total, disk_used,
-      cpu_cores, cpu_info, gpu, gpu_info, arch, os, region, ip_v4, ip_v6, boot_time,
+      cpu_cores, cpu_info, gpu_info, arch, os, region, ip_v4, ip_v6, boot_time,
       net_rx_monthly, net_tx_monthly
     ) VALUES (
       ?, ?, ?, ?, ?,
@@ -386,7 +391,7 @@ export async function saveMetricsHistory(db, serverId, historyPartitionId, metri
       ?, ?, ?, ?,
       ?, ?, ?, ?,
       ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?
     )
   `).bind(
@@ -419,8 +424,7 @@ export async function saveMetricsHistory(db, serverId, historyPartitionId, metri
     parseFloat(metrics.disk_used) || 0,
     parseInt(metrics.cpu_cores) || 0,
     metrics.cpu_info || '',
-    metrics.gpu === '' || metrics.gpu === null || metrics.gpu === undefined ? null : (parseFloat(metrics.gpu) || 0),
-    metrics.gpu_info || '',
+    Array.isArray(metrics.gpu_info) ? JSON.stringify(metrics.gpu_info) : (metrics.gpu_info || ''),
     metrics.arch || '',
     metrics.os || '',
     regionCode,
@@ -475,7 +479,7 @@ export async function getLatestMetrics(db, serverId, server = null) {
       ORDER BY timestamp DESC
       LIMIT 1
     `).bind(serverId).first();
-    return result || null;
+    return result ? normalizeProbeMetricRow(result) : null;
   } catch (e) {
     console.error('获取最新指标数据失败:', e);
     return null;

@@ -2,7 +2,7 @@
   <div id="tab-settings" class="tab-content" :class="{ active: activeTab === 'settings' }">
     <div class="settings-grid">
       <div class="settings-section" v-if="currentOrigin === selectedApiBase">
-        <div class="section-title"><span>▸</span> {{ trans.appearance }}</div>
+        <div class="section-title"><span>▸</span> {{ trans.appearance }} 1</div>
 
         <div class="form-row">
           <div class="form-group flex-1">
@@ -22,6 +22,29 @@
             <img v-if="settings.custom_bg" :src="settings.custom_bg" class="bg-preview">
           </div>
         </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.displayMode }}</label>
+            <select v-model="settings.display_mode" class="form-select">
+              <option value="bar">{{ trans.displayModeBar }}</option>
+              <option value="ring">{{ trans.displayModeRing }}</option>
+              <option value="table">{{ trans.displayModeTable }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.themeOptions }}</label>
+            <textarea v-model="settings.theme_options" class="form-textarea" rows="5" placeholder='{"a":1,"b":2}'></textarea>
+            <p class="text-muted text-sm mt-1">{{ trans.themeOptionsTip }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section" v-if="currentOrigin === selectedApiBase">
+        <div class="section-title"><span>▸</span> {{ trans.appearance }} 2</div>
 
         <div class="form-row">
           <div class="form-group flex-1">
@@ -104,16 +127,15 @@
           <div class="form-group flex-1">
             <label class="form-label">{{ trans.offlineAlert }}</label>
             <select v-model="settings.tg_notify" class="form-select">
-              <option value="false">[OFF] {{ trans.disabled }}</option>
-              <option value="true">[ON] {{ trans.notifyOffline }}</option>
+              <option v-for="option in offlineNotifyOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </div>
 
           <div class="form-group flex-1">
             <label class="form-label">{{ trans.expireReminder }}</label>
             <select v-model="settings.expire_reminder" class="form-select">
-              <option value="false">[OFF] {{ trans.disabled }}</option>
-              <option value="true">[ON] {{ trans.notifyExpire }}</option>
+              <option value="false">{{ trans.disabled }}</option>
+              <option value="true">{{ trans.notifyExpire }}</option>
             </select>
           </div>
         </div>
@@ -192,7 +214,7 @@
         <div class="form-group mt-4">
           <label class="form-label">{{ trans.jwtSecret }}</label>
           <div class="password-input-wrapper">
-            <input type="text" name="jwt_secret" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model="settings.jwt_secret" :class="['form-input', { 'secret-input-masked': !passwordVisible.jwtSecret }]" :placeholder="trans.jwtSecretPlaceholder">
+            <input type="text" name="jwt_secret" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model="settings.jwt_secret" :class="['form-input', { 'secret-input-masked': !passwordVisible.jwtSecret }]" placeholder="••••••••••••••••••••••••••••••••">
             <button type="button" class="password-toggle" @click="$emit('toggle-password', 'jwtSecret')">
               {{ passwordVisible.jwtSecret ? '🙈' : '👁️' }}
             </button>
@@ -337,7 +359,7 @@
 
           <div class="form-group flex-1">
             <label class="form-label">{{ trans.customBd }}</label>
-            <input type="text" v-model.trim="settings.custom_bd" :class="['form-input', { 'input-invalid': pingNodeErrors.custom_bd }]" placeholder="lf3-ips.zstaticcdn.com">
+            <input type="text" v-model.trim="settings.custom_bd" :class="['form-input', { 'input-invalid': pingNodeErrors.custom_bd }]" placeholder="ip.zstaticcdn.com">
             <p v-if="pingNodeErrors.custom_bd" class="text-red text-sm mt-1">{{ pingNodeErrors.custom_bd }}</p>
           </div>
         </div>
@@ -377,6 +399,21 @@ const cspErrors = reactive({
   csp_static: '',
   csp_api: ''
 })
+
+const offlineNotifyOptions = computed(() => [
+  { value: '0', label: `${props.trans.disabled}` },
+  ...Array.from({ length: 29 }, (_, index) => {
+    const minutes = index + 2
+    const label = props.trans.notifyOfflineMinutes
+      ? props.trans.notifyOfflineMinutes.replace('{minutes}', minutes)
+      : `${minutes} min`
+
+    return {
+      value: String(minutes),
+      label: `${label}`
+    }
+  })
+])
 
 const pingNodeErrorMessage = computed(() => (
   props.trans.invalidPingNodeFormat || 'Use domain, IPv4, or host:port. Port must be 1-65535.'

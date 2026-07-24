@@ -8,6 +8,7 @@
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
     "dev:frontend": "vite",
+    "build": "node scripts/build.js",
     "build:frontend": "node scripts/build.js",
     "build:github-page": "node scripts/build-github-page.js",
     "test:agent-config": "node test/agent-config.js",
@@ -26,6 +27,7 @@
     "@vitejs/plugin-vue": "^6.0.0",
     "fs-extra": "^11.3.5",
     "vite": "^6.0.0",
+    "vite-plugin-mkcert": "^2.1.0",
     "wrangler": "^4.0.0"
   },
   "dependencies": {
